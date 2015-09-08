@@ -1,0 +1,202 @@
+#!/bin/bash
+#
+### BEGIN INIT INFO
+# Provides:          webrtc2sip on instances
+# Required-Start:    $syslog $network $local_fs $remote_fs $time
+# Required-Stop:     $syslog $network $local_fs $remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Start and stop the webrtc2sip
+# Description:       Start and stop the webrtc2sip
+### END INIT INFO
+
+## Script to start webrtc based on instances
+## Copyright 2015, Jorge Fonseca - http://jorge.fonseca.ec
+
+## Licensed under the Apache License, Version 2.0 (the "License");
+## you may not use this file except in compliance with the License.
+## You may obtain a copy of the License at
+
+##    http://www.apache.org/licenses/LICENSE-2.0
+
+## Unless required by applicable law or agreed to in writing, software
+## distributed under the License is distributed on an "AS IS" BASIS,
+## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+## See the License for the specific language governing permissions and
+## limitations under the License.
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+DAEMON=/usr/local/sbin/webrtc2sip
+DAEMONSCRIPT=/usr/local/sbin/webrtc2sip-script
+CONFIGDIR=/usr/local/etc/webrtc2sip
+PIDDIR=/var/run/webrtc2sip
+NAME="webrtc2sip"
+DESC="WebRTC To SIP"
+USER=$NAME
+GROUP=$USER
+
+## Options for start-stop-daemon
+STARTOPTS="--start --make-pidfile --background --no-close --quiet --chuid $USER:$GROUP"
+STOPOPTS="--stop --quiet --retry 4"
+
+. /lib/lsb/init-functions
+
+## Check for some utilities needed
+REQUERIMENTS='grep sleep logger wc ps netstat awk'
+for REQ in $REQUERIMENTS
+do
+  REQCHECK=`which $REQ`
+  if [ ! $REQCHECK ]; then
+    log_failure_msg "FATAL: \"$REQ\" was not found in the system"
+    exit 1
+  fi
+done
+
+## Check if webrtc2sip is instaled its configurations and dependecies
+if [ ! -x "$DAEMON" ]; then
+  log_failure_msg "file doesn't exist! please install webrtc2sip ($DAEMON)"
+  exit 4
+elif [ ! -d "$CONFIGDIR" ]; then
+  log_failure_msg "configuration directory of webrtc2sip doesn't exist ($CONFIGDIR)"
+  exit 1
+# Exit if the configuration directory is empty 
+elif [ `ls -1 $CONFIGDIR/*.xml 2> /dev/null|wc -l` -eq 0 ]; then
+  log_failure_msg "no configuration files found on $CONFIGDIR"
+  exit 1
+fi
+
+# Handle arguments passed to the script
+if [ $# -eq 1 ]; then
+  CONFSUFFIX="*.xml"
+  ACTION=$1
+elif [ $# -eq 2 ]; then
+  CONFSUFFIX="$1.xml"
+  ACTION=$2
+else
+  echo "Usage: $0 {start|stop|restart|force-reload}"
+  exit 2
+fi
+
+# Create PID directory if not exists (usually requiered on debian family distros)
+if [ ! -d $PIDDIR ]; then
+  mkdir -m 0755 $PIDDIR 
+  chown $USER:$GROUP $PIDDIR
+fi
+
+# This function check for ports on any running instanes
+waitforports ()
+{
+  transports=$(grep '<transport>' $1|cut  -f3 -d ";"|cut -f1 -d "<")
+  if [ -n "$transports" ]; then 
+    for port in ${transports}
+    do
+      while [ -n "$(netstat -t | grep ":$port")" ]
+      do
+        echo "Waiting por port $port to be avaliable..."
+        sleep 5
+      done
+    #echo "Puerto libre!!!"
+    done
+  fi
+}
+
+# This conditional loop handle the instances scheme
+for CONF in $CONFIGDIR/$CONFSUFFIX
+do
+  START=false
+  INSTANCE="${CONF//*\//}"
+  INSTANCE="${INSTANCE//.xml/}"
+  DEFAULTCONF="/etc/default/$NAME-$INSTANCE"
+  
+  # Read the default configuration of $DEFAULTCONF if is readable
+  [ -r $DEFAULTCONF ] && . $DEFAULTCONF
+  if [ $START != "true" ]; then
+    log_action_msg "($INSTANCE) daemon is not enabled on $DEFAULTCONF"
+    continue
+  # Check if configuration file is readable
+  elif [ ! -s "$CONF" ] || [ ! -r $CONF ]; then
+    log_failure_msg "cannot read $CONF"
+    continue
+  fi
+
+  ## Function to start the service
+  start_webrtc2sip_daemon () {
+  ## Wait for port to be avaliable
+  waitforports "$CONF"	
+  $(status_of_proc -p "$PIDDIR/$INSTANCE" $(which screen) $INSTANCE >/dev/null)
+  SERVICE_STATUS="$?"
+  if [ ! $SERVICE_STATUS ] || [ $SERVICE_STATUS -eq 0 ]; then
+    log_failure_msg "Already running $NAME ($INSTANCE) cannot start daemon"
+    continue
+  elif [ $SERVICE_STATUS -eq 1 ] || [ $SERVICE_STATUS -eq 3 ]; then
+    log_daemon_msg "Starting $NAME: ($INSTANCE)"
+    start-stop-daemon $STARTOPTS --pidfile "$PIDDIR/$INSTANCE" --exec $DAEMONSCRIPT -- "$CONF"
+    ## Get and write the correct PID (i don't like this dirty way to do it :'( )
+    ESPERA=10
+    INTENTO=1
+    CORRECTPID=""
+    while [ -z "$CORRECTPID" ] 
+    do
+      if [ $INTENTO -le $ESPERA ]; then
+        CORRECTPID=`ps ax|grep "$DAEMON --config=$CONF"|grep "Sl"|awk '{ print $1 }'`
+        if [ -n "$CORRECTPID" ]; then
+          echo "$CORRECTPID" > "$PIDDIR/$INSTANCE"
+        fi
+        sleep 1
+        ((INTENTO+=1))
+      else
+        break
+      fi
+    done
+    log_end_msg $?
+    res=$?
+    fi
+  }
+
+  stop_webrtc2sip_daemon () {
+    $(status_of_proc -p "$PIDDIR/$INSTANCE" $DAEMON $INSTANCE >/dev/null)
+    SERVICE_STATUS="$?"
+    if [ ! $SERVICE_STATUS ] || [ $SERVICE_STATUS -eq 0 ]; then
+      log_daemon_msg "Stopping $NAME: ($INSTANCE)"
+      start-stop-daemon $STOPOPTS --pidfile "$PIDDIR/$INSTANCE"
+      log_end_msg $?
+    elif [ $SERVICE_STATUS -eq 1 ] || [ $SERVICE_STATUS -eq 3 ]; then
+      log_failure_msg "$NAME ($INSTANCE) not running, cannot stop daemon"
+      continue
+    else
+      log_failure_msg "$NAME ($INSTANCE) can't determine the status of service, cannot stop daemon"
+      continue
+    fi
+}
+
+case "$ACTION" in
+  start)
+    start_webrtc2sip_daemon
+    ;;
+  stop)
+    stop_webrtc2sip_daemon
+    ;;
+  status)
+    status_of_proc -p "$PIDDIR/$INSTANCE" $DAEMON "$NAME ($INSTANCE)"
+    ;;
+  restart|force-reload)
+    stop_webrtc2sip_daemon
+    start_webrtc2sip_daemon
+    ;;
+  force-start)
+    start_webrtc2sip_daemon
+    ;;
+  force-restart)
+    stop_webrtc2sip_daemon
+    start_webrtc2sip_daemon
+    ;;
+  force-reload)
+    stop_webrtc2sip_daemon
+    start_webrtc2sip_daemon
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|force-reload}"
+    exit 2
+    ;;
+esac
+done
