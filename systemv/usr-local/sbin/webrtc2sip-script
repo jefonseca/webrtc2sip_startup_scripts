@@ -1,6 +1,6 @@
 #!/bin/bash
 # Script to start webrtc2sip on background (whitout a terminal mutiplexer)
-## Copyright 2014, Jorge Fonseca - http://jorge.fonseca.ec
+## Copyright 2015, Jorge Fonseca - http://jorge.fonseca.ec
 
 ## Licensed under the Apache License, Version 2.0 (the "License");
 ## you may not use this file except in compliance with the License.
