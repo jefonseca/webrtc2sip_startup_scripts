@@ -19,5 +19,6 @@ cp -v --backup=numbered etc-default/webrtc2sip-instance01 /etc/default/
 cp -v --backup=numbered etc-init.d/webrtc2sip /etc/init.d/
 cp -rv --backup=numbered usr-local/etc/ /usr/local/
 cp -v --backup=numbered usr-local/sbin/webrtc2sip-script /usr/local/sbin/
+adduser --quiet --system --group --disabled-password --shell /bin/sh --gecos "webrtc2sip" --home /var/run/webrtc2sip webrtc2sip
 update-rc.d webrtc2sip defaults
 echo "End of script"
