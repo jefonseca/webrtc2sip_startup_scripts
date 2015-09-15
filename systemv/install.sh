@@ -14,7 +14,7 @@
 ## See the License for the specific language governing permissions and
 ## limitations under the License.
 
-echo "Installing sistem service"
+echo "Installing system service"
 cp -v --backup=numbered etc-default/webrtc2sip-instance01 /etc/default/
 cp -v --backup=numbered etc-init.d/webrtc2sip /etc/init.d/
 cp -rv --backup=numbered usr-local/etc/ /usr/local/
